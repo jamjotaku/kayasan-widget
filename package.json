@@ -1,26 +1,40 @@
 {
   "name": "kaya-fan-widget",
   "version": "1.0.0",
+  "description": "Kaya Fan System Widget",
   "main": "main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "electron": "electron ."
+    "electron": "electron .",
+    "dist": "next build && electron-builder"
   },
   "build": {
     "appId": "com.kaya.fanwidget",
+    "productName": "KayaFanWidget",
     "files": [
       "out/**/*",
       "main.js",
-      "preload.js"
+      "preload.js",
+      "package.json"
     ],
     "win": {
-      "target": "portable"
+      "target": "portable",
+      "icon": "public/icon.ico"
     }
   },
+  "dependencies": {
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "papaparse": "^5.4.1"
+  },
+  "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "latest"
+  },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": ""
+  "author": "Your Name",
+  "license": "ISC"
 }

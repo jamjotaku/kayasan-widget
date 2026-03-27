@@ -1,16 +1,17 @@
 name: Build Electron App
 
+# ★ここを修正：自動実行をやめて、手動実行(workflow_dispatch)にする
 on:
-  push:
-    branches: [ main ]
+  workflow_dispatch: # これを入れると、GitHub上でボタンが出現します
 
 jobs:
   build:
     runs-on: windows-latest
-    # ★ここを追加：すべてのコマンドを widget フォルダ内で実行するように指定
     defaults:
       run:
         working-directory: apps/widget
+    
+    # ...（以下、手順は今のままでOK）
 
     steps:
       - name: Checkout code

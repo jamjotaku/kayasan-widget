@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Head from 'next/head';
 
-const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQcUDA9Y3c70dZcVHxAS-o51kCMktANMV31Y7pYFfvnhZfDejfntqIZEKmWA7fKPefrEKChGH9MLOj2/pub?gid=925424429&single=true&output=csv";
+const DEFAULT_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQcUDA9Y3c70dZcVHxAS-o51kCMktANMV31Y7pYFfvnhZfDejfntqIZEKmWA7fKPefrEKChGH9MLOj2/pub?gid=925424429&single=true&output=csv";
 
 const SIZES = { 
   '小': { w: 240, h: 360 }, 
@@ -13,20 +13,40 @@ const SIZES = {
 export default function KayaWidget() {
   const [allData, setAllData] = useState([]);
   const [currentPhoto, setCurrentPhoto] = useState(null);
+  const [nextPhoto, setNextPhoto] = useState(null); // クロスフェード用
+  const [isFading, setIsFading] = useState(false);
+  
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('display'); 
   const [config, setConfig] = useState({ interval: 60, size: '中' });
+  
+  // URL管理
+  const [csvUrl, setCsvUrl] = useState(DEFAULT_CSV_URL);
+  const [inputUrl, setInputUrl] = useState("");
+
   const [pomoConfig, setPomoConfig] = useState({ focusTime: 25, breakTime: 5 });
   const [pomoStatus, setPomoStatus] = useState('idle'); 
   const [timeLeft, setTimeLeft] = useState(0);
   const [now, setNow] = useState(new Date());
 
-  // データ読み込み
+  // 1. 初期ロード（URLの復元）
   useEffect(() => {
+    const savedUrl = localStorage.getItem('custom_csv_url');
+    if (savedUrl) {
+      setCsvUrl(savedUrl);
+      setInputUrl(savedUrl);
+    } else {
+      setInputUrl(DEFAULT_CSV_URL);
+    }
     const clock = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(clock);
+  }, []);
+
+  // 2. データ読み込み (csvUrlが変わるたびに実行)
+  useEffect(() => {
     const loadData = async () => {
       try {
-        const response = await fetch(CSV_URL);
+        const response = await fetch(csvUrl);
         const csvText = await response.text();
         const Papa = (await import('papaparse')).default;
         Papa.parse(csvText, {
@@ -34,28 +54,52 @@ export default function KayaWidget() {
           complete: (res) => {
             const formatted = res.data.map(d => ({
               character: (d['キャラクター'] || d['名前'] || d['member'] || "Unknown").trim(),
+              displayName: (d['表示名'] || d['名前'] || "").trim(), // ★名前/表示名を取得
               image: (d['image'] || d['画像'] || d['link'] || "").trim().replace('name=medium', 'name=large'),
             })).filter(d => d.image && d.image.startsWith('http'));
             setAllData(formatted);
           }
         });
-      } catch (e) { console.error(e); }
+      } catch (e) { console.error("CSV読み込みエラー:", e); }
     };
     loadData();
-    return () => clearInterval(clock);
-  }, []);
+  }, [csvUrl]);
 
+  // 3. 写真のピックアップ（クロスフェード対応）
   const pickPhoto = useCallback(() => {
     if (allData.length === 0) return;
-    setCurrentPhoto(allData[Math.floor(Math.random() * allData.length)]);
-  }, [allData]);
+    const nextIdx = Math.floor(Math.random() * allData.length);
+    const selected = allData[nextIdx];
+
+    if (!currentPhoto) {
+      setCurrentPhoto(selected);
+    } else {
+      setNextPhoto(selected);
+      setIsFading(true);
+      setTimeout(() => {
+        setCurrentPhoto(selected);
+        setNextPhoto(null);
+        setIsFading(false);
+      }, 1500); // 1.5秒かけてフェード
+    }
+  }, [allData, currentPhoto]);
 
   useEffect(() => {
-    pickPhoto();
+    if (allData.length > 0 && !currentPhoto) pickPhoto();
     const timer = setInterval(pickPhoto, (pomoStatus === 'break' ? 10 : config.interval) * 1000);
     return () => clearInterval(timer);
-  }, [pickPhoto, config.interval, pomoStatus]);
+  }, [pickPhoto, config.interval, pomoStatus, allData.length, currentPhoto]);
 
+  // --- URL更新機能 ---
+  const handleUpdateUrl = () => {
+    if (!inputUrl.startsWith('http')) return alert("有効なURLを入力してください");
+    localStorage.setItem('custom_csv_url', inputUrl);
+    setCsvUrl(inputUrl);
+    setIsSettingsOpen(false);
+    alert("データソースを更新しました");
+  };
+
+  // --- 既存ロジック ---
   useEffect(() => {
     if (pomoStatus === 'idle') return;
     const timer = setInterval(() => {
@@ -83,9 +127,7 @@ export default function KayaWidget() {
     }
   }, [config.size]);
 
-  // アプリ終了ボタン用
   const handleExit = () => { if (confirm("アプリを終了しますか？")) window.close(); };
-
   const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
 
   return (
@@ -96,9 +138,15 @@ export default function KayaWidget() {
       </Head>
 
       <div className="main-wrapper">
-        <div className="bg-layer">{currentPhoto && <img src={currentPhoto.image} className="main-photo" alt="" />}</div>
+        <div className="bg-layer">
+          {currentPhoto && (
+            <img src={currentPhoto.image} className={`main-photo ${isFading ? 'fade-out' : ''}`} alt="" />
+          )}
+          {nextPhoto && (
+            <img src={nextPhoto.image} className="main-photo next-photo" alt="" />
+          )}
+        </div>
         
-        {/* ★ここがバグ修正の肝！設定画面が開いている時はドラッグを無効化 */}
         {!isSettingsOpen && <div className="drag-handle"></div>}
 
         <div className="ui-container">
@@ -112,6 +160,8 @@ export default function KayaWidget() {
           <div className="center-content">
             <h1 className="main-title">Kaya</h1>
             <div className="character-tag">{currentPhoto?.character || '---'}</div>
+            {/* ★名前の表示を追加 */}
+            <div className="display-name">{currentPhoto?.displayName}</div>
           </div>
           <div className="bottom-bar">
             <div className="status-info"><span className="label">MODE</span><div className="val">{pomoStatus.toUpperCase()}</div></div>
@@ -122,7 +172,6 @@ export default function KayaWidget() {
           </div>
         </div>
 
-        {/* 設定モーダル */}
         <div className={`settings-modal no-drag ${isSettingsOpen ? 'open' : ''}`}>
           <div className="modal-content">
             <div className="modal-header">
@@ -153,6 +202,15 @@ export default function KayaWidget() {
               )}
               {activeTab === 'system' && (
                 <div className="setting-group">
+                  <label>CSV DATA SOURCE URL</label>
+                  <input 
+                    type="text" 
+                    className="url-input" 
+                    value={inputUrl} 
+                    onChange={e => setInputUrl(e.target.value)}
+                    placeholder="https://docs.google.com/..."
+                  />
+                  <button className="update-btn" onClick={handleUpdateUrl}>APPLY & REFRESH</button>
                   <label>APPLICATION</label>
                   <button className="exit-btn" onClick={handleExit}>QUIT_APP</button>
                 </div>
@@ -166,17 +224,23 @@ export default function KayaWidget() {
       <style jsx global>{`
         body { margin: 0; background: transparent; overflow: hidden; font-family: 'Montserrat', sans-serif; color: white; }
         .main-wrapper { width: 100vw; height: 100vh; position: relative; background: #000; border-radius: 20px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); }
-        .main-photo { width: 100%; height: 100%; object-fit: cover; opacity: 0.7; transition: 0.8s; }
+        
+        /* クロスフェード用のCSS */
+        .bg-layer { position: absolute; inset: 0; z-index: 0; }
+        .main-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.7; transition: opacity 1.5s ease-in-out; }
+        .fade-out { opacity: 0; }
+        .next-photo { z-index: 1; animation: fadeIn 1.5s ease-in-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 0.7; } }
+
         .drag-handle { position: absolute; inset: 0; z-index: 5; -webkit-app-region: drag; }
         .no-drag { -webkit-app-region: no-drag !important; pointer-events: auto !important; }
-        
         .ui-container { position: absolute; inset: 0; z-index: 10; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
         .clock { font-family: 'JetBrains Mono'; font-size: 14px; font-weight: 800; }
         .icon-btn { background: none; border: none; color: #666; cursor: pointer; font-size: 18px; transition: 0.3s; }
         .icon-btn:hover { color: #fff; }
-
         .main-title { font-family: 'Playfair Display', serif; font-style: italic; font-size: 48px; margin: 0; }
         .character-tag { font-family: 'JetBrains Mono'; font-size: 10px; color: #00f2ff; margin-top: 4px; }
+        .display-name { font-size: 14px; font-weight: 800; margin-top: 5px; opacity: 0.8; letter-spacing: 1px; }
 
         .pomo-control { background: rgba(0,0,0,0.8); border: 1px solid #333; color: #fff; padding: 10px 20px; border-radius: 40px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #444; }
@@ -186,17 +250,13 @@ export default function KayaWidget() {
         .settings-modal { position: absolute; inset: 0; background: rgba(10,10,12,0.98); z-index: 100; transform: translateY(100%); transition: 0.4s cubic-bezier(0.19, 1, 0.22, 1); }
         .settings-modal.open { transform: translateY(0); }
         .modal-content { padding: 30px; height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
-        
         .tab-nav { display: flex; gap: 15px; border-bottom: 1px solid #222; margin-bottom: 20px; }
         .tab-nav button { background: none; border: none; color: #444; font-weight: 800; padding-bottom: 10px; cursor: pointer; font-size: 10px; }
         .tab-nav button.active { color: #00f2ff; border-bottom: 2px solid #00f2ff; }
         
         .setting-group label { display: block; font-size: 10px; color: #666; margin: 20px 0 8px 0; }
-        input[type="range"] { width: 100%; accent-color: #00f2ff; }
-        .btn-grid { display: flex; gap: 5px; }
-        .btn-grid button { flex: 1; padding: 8px; background: #111; border: 1px solid #222; color: #444; border-radius: 6px; cursor: pointer; font-size: 10px; }
-        .btn-grid button.active { border-color: #00f2ff; color: #00f2ff; }
-        
+        .url-input { width: 100%; background: #111; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 6px; font-family: 'JetBrains Mono'; font-size: 10px; margin-bottom: 10px; }
+        .update-btn { width: 100%; background: #00f2ff; color: #000; border: none; padding: 10px; border-radius: 6px; font-weight: 800; font-size: 10px; cursor: pointer; }
         .exit-btn { background: #300; color: #f55; border: 1px solid #511; padding: 12px; width: 100%; border-radius: 8px; cursor: pointer; font-family: 'JetBrains Mono'; font-weight: 800; margin-top: 10px; }
         .apply-btn { background: #fff; color: #000; border: none; padding: 14px; border-radius: 8px; font-weight: 800; margin-top: auto; cursor: pointer; }
         .close-x { background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; }

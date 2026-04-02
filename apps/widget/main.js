@@ -31,7 +31,7 @@ function createWindow() {
     });
   } else {
     // 開発時は今まで通り Codespaces のローカルサーバー (localhost:3000)
-    win.loadURL('http://localhost:3000');
+    const REMOTE_URL = 'https://jamjotaku.github.io/kayasan-fansite/widget/';
   }
 
   // win.webContents.openDevTools();
